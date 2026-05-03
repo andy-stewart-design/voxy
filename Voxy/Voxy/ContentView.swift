@@ -83,10 +83,19 @@ struct ContentView: View {
             return
         }
 
+        // Read the hardware format before installing the tap. The tap format
+        // must match the hardware exactly — mismatches cause error -10868.
+        // HFP Bluetooth devices often use 24000 Hz rather than the standard
+        // 48000 Hz, so we can't assume a fixed rate.
+        let inputFormat = engine.inputNode.inputFormat(forBus: 0)
+        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
+            errorMessage = "Could not read audio format — try again"
+            return
+        }
+
         // A tap must be installed before engine.start() on macOS — the engine
         // won't initialize input/output nodes without at least one active tap.
-        // nil format lets the engine choose based on the hardware configuration.
-        engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { _, _ in
+        engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { _, _ in
             // TODO: process captured audio buffers
         }
 
@@ -95,19 +104,6 @@ struct ContentView: View {
         } catch {
             engine.inputNode.removeTap(onBus: 0)
             errorMessage = error.localizedDescription
-            return
-        }
-
-        // Let the hardware settle before reading the input format.
-        // Accessing inputNode.inputFormat immediately after engine.start() can
-        // return an unstable sample rate or zero channel count on some devices.
-        try? await Task.sleep(nanoseconds: 150_000_000) // 150ms
-
-        let format = engine.inputNode.inputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else {
-            errorMessage = "Invalid audio format — try again"
-            engine.inputNode.removeTap(onBus: 0)
-            engine.stop()
             return
         }
 
