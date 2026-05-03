@@ -115,6 +115,8 @@ struct ContentView: View {
     private func requestMicrophonePermissionIfNeeded() async {
         guard AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined else { return }
         await AVCaptureDevice.requestAccess(for: .audio)
+        // Re-evaluate now that permission has been granted or denied.
+        audio.refresh()
     }
 
     // MARK: - Presentation

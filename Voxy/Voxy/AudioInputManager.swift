@@ -125,8 +125,20 @@ final class AudioInputManager: ObservableObject {
 
     // MARK: - Evaluation
 
+    /// Call after a permission change (grant or denial) to force re-evaluation.
+    func refresh() {
+        evaluateInput()
+    }
+
     private func evaluateInput() {
-        guard checkMicrophonePermission() else {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            break
+        case .notDetermined:
+            // Dialog hasn't been shown yet — not denied, just unknown.
+            readiness = .unknown
+            return
+        default:
             readiness = .permissionDenied
             stopBluetoothPolling()
             return
@@ -185,11 +197,7 @@ final class AudioInputManager: ObservableObject {
         bluetoothPollingTask = nil
     }
 
-    // MARK: - Permission
-
-    private func checkMicrophonePermission() -> Bool {
-        AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
-    }
+    // MARK: - Permission (removed — logic moved inline to evaluateInput)
 
     // MARK: - Core Audio Helpers
 
