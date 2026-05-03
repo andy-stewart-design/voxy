@@ -117,6 +117,9 @@ struct ContentView: View {
         await AVCaptureDevice.requestAccess(for: .audio)
         // Re-evaluate now that permission has been granted or denied.
         audio.refresh()
+        // The system dialog causes .accessory apps to lose window visibility.
+        // Re-activate to bring the settings window back to the front.
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     // MARK: - Presentation
