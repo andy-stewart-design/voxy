@@ -8,12 +8,21 @@ struct ContentView: View {
     // view body re-evaluations — it is NOT recreated on each render.
     @State private var engine = AVAudioEngine()
     @State private var isRecording = false
+    @State private var recordingURL: URL?
+    @State private var player: AVAudioPlayer?
+    @State private var isPlaying = false
     @State private var errorMessage: String?
 
     var body: some View {
         VStack(spacing: 20) {
             statusLabel
-            recordButton
+
+            HStack(spacing: 12) {
+                recordButton
+                if recordingURL != nil {
+                    playButton
+                }
+            }
 
             if let error = errorMessage {
                 Text(error)
@@ -70,10 +79,25 @@ struct ContentView: View {
         .disabled(audio.readiness == .permissionDenied)
     }
 
+    private var playButton: some View {
+        Button(isPlaying ? "Stop" : "Play") {
+            if isPlaying {
+                stopPlayback()
+            } else {
+                playRecording()
+            }
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(isPlaying ? .orange : .green)
+        .disabled(isRecording)
+    }
+
     // MARK: - Recording Flow
 
     private func startRecording() async {
         errorMessage = nil
+        recordingURL = nil
+        stopPlayback()
 
         guard await audio.waitUntilReady() else {
             errorMessage = switch audio.readiness {
@@ -93,10 +117,23 @@ struct ContentView: View {
             return
         }
 
+        // Write to a temp .caf file. The file is captured by the tap closure
+        // and stays open until the tap is removed.
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString + ".caf")
+
+        let file: AVAudioFile
+        do {
+            file = try AVAudioFile(forWriting: tempURL, settings: inputFormat.settings)
+        } catch {
+            errorMessage = error.localizedDescription
+            return
+        }
+
         // A tap must be installed before engine.start() on macOS — the engine
         // won't initialize input/output nodes without at least one active tap.
-        engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { _, _ in
-            // TODO: process captured audio buffers
+        engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
+            try? file.write(from: buffer)
         }
 
         do {
@@ -107,13 +144,36 @@ struct ContentView: View {
             return
         }
 
+        recordingURL = tempURL
         isRecording = true
     }
 
     private func stopRecording() {
+        // Removing the tap releases the closure's reference to AVAudioFile,
+        // which flushes and closes the file before we attempt playback.
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         isRecording = false
+    }
+
+    // MARK: - Playback
+
+    private func playRecording() {
+        guard let url = recordingURL else { return }
+        do {
+            player = try AVAudioPlayer(contentsOf: url)
+            player?.delegate = PlaybackDelegate(onFinish: { isPlaying = false })
+            player?.play()
+            isPlaying = true
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func stopPlayback() {
+        player?.stop()
+        player = nil
+        isPlaying = false
     }
 
     // MARK: - Permission
@@ -145,5 +205,20 @@ struct ContentView: View {
         case .ready where isRecording: return .green
         default:                       return .primary
         }
+    }
+}
+
+// MARK: - Playback Delegate
+
+// AVAudioPlayerDelegate is an ObjC protocol — requires a class.
+private final class PlaybackDelegate: NSObject, AVAudioPlayerDelegate {
+    private let onFinish: () -> Void
+
+    init(onFinish: @escaping () -> Void) {
+        self.onFinish = onFinish
+    }
+
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully _: Bool) {
+        DispatchQueue.main.async { self.onFinish() }
     }
 }
