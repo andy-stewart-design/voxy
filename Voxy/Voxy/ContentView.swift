@@ -10,6 +10,7 @@ struct ContentView: View {
     @State private var isRecording = false
     @State private var recordingURL: URL?
     @State private var player: AVAudioPlayer?
+    @State private var playbackDelegate: PlaybackDelegate?
     @State private var isPlaying = false
     @State private var errorMessage: String?
 
@@ -161,8 +162,10 @@ struct ContentView: View {
     private func playRecording() {
         guard let url = recordingURL else { return }
         do {
+            let delegate = PlaybackDelegate(onFinish: { isPlaying = false })
             player = try AVAudioPlayer(contentsOf: url)
-            player?.delegate = PlaybackDelegate(onFinish: { isPlaying = false })
+            player?.delegate = delegate
+            playbackDelegate = delegate
             player?.play()
             isPlaying = true
         } catch {
