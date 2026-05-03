@@ -16,6 +16,11 @@ build/
 .AppleDouble
 .LSOverride
 
+# Build artifacts
+*.app
+*.dmg
+*.zip
+
 # Swift Package Manager
 .build/
 .swiftpm/
