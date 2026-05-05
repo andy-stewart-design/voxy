@@ -4,6 +4,7 @@ import SwiftUI
 @main
 struct VoxyApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @StateObject private var transcription = TranscriptionManager()
 
     var body: some Scene {
         MenuBarExtra("Voxy", systemImage: "waveform") {
@@ -11,8 +12,9 @@ struct VoxyApp: App {
         }
         .menuBarExtraStyle(.menu)
 
-        Window("Settings", id: "settings") {
+        Window("Voxy", id: "main") {
             ContentView()
+                .environmentObject(transcription)
         }
         .windowResizability(.contentSize)
         .defaultPosition(.center)
@@ -31,7 +33,7 @@ struct MenuView: View {
 
     var body: some View {
         Button("Settings") {
-            openWindow(id: "settings")
+            openWindow(id: "main")
             NSApp.activate(ignoringOtherApps: true)
         }
         Divider()

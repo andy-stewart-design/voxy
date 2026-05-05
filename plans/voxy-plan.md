@@ -24,41 +24,21 @@ The app currently has a working foundation: a menu bar extra, a settings window,
 
 ---
 
-### 1a — WhisperKit wired up, transcript appears after recording
+### ~~1a — WhisperKit wired up, transcript appears after recording~~ ✅ DONE
 
-**What changes:**
+**What was built:**
 
-- Add WhisperKit package in Xcode (manual step — see below)
-- New `TranscriptionManager.swift`: app-level `@MainActor ObservableObject`, loads `small.en` on init
-- `VoxyApp.swift`: add `@StateObject private var transcription = TranscriptionManager()` + `.environmentObject(transcription)` on the Window scene
-- `ContentView.swift`: after `stopRecording()`, call `transcription.transcribe(audioURL:)` and display the result in a plain `Text` view (no editing yet)
+- WhisperKit added via Xcode SPM (File → Add Package Dependencies → `https://github.com/argmaxinc/argmax-oss-swift`, WhisperKit product only)
+- `TranscriptionManager.swift`: app-level `@MainActor ObservableObject`, loads `small.en` on init
+- `VoxyApp.swift`: `@StateObject private var transcription = TranscriptionManager()` + `.environmentObject(transcription)` on the Window scene
+- `ContentView.swift`: calls `transcription.transcribe(audioURL:)` after `stopRecording()`, displays result in a plain `Text` view
 
-**TranscriptionManager state machine:**
-
-```
-.loading(Double)  →  .ready  →  .transcribing  →  .ready
-                                                ↘  .failed(String)
-```
-
-Key points:
-
-- `transcribe(audioURL:) async -> String?` returns text — ContentView owns accumulation, TranscriptionManager does not publish transcript
-- `retry()` re-runs `loadModel(named:)` from `.failed`
-- Model weights cache to Caches directory; subsequent launches load in seconds
-
-> **⚠️ Add WhisperKit in Xcode:** File → Add Package Dependencies → `https://github.com/argmaxinc/argmax-oss-swift`, select the **WhisperKit** product only. Do NOT edit pbxproj manually — the project uses `PBXFileSystemSynchronizedRootGroup`.
-
-> **⚠️ Keep WhisperKit out of views.** Model init is expensive (~2-5s + download). It must live in `TranscriptionManager`, not `ContentView` — otherwise it reinitializes every time the window opens.
-
-> **⚠️ Order matters.** Call `transcription.transcribe()` **after** `stopRecording()`. Removing the tap flushes and closes the AVAudioFile — calling transcribe before that yields an incomplete or locked file.
-
-**Acceptance criteria:**
-
-- [ ] First launch: model download progress shown (ProgressView), window remains usable
-- [ ] Record + stop → transcript text appears automatically
-- [ ] Works with both built-in mic (48kHz) and Bluetooth HFP (24kHz)
-- [ ] `.failed` state shows a Retry button that works
-- [ ] Close and reopen window → model is already loaded (no re-download)
+**Key learnings / gotchas:**
+- App sandbox requires `com.apple.security.network.client` entitlement — add via Signing & Capabilities or `Voxy.entitlements`
+- `State.loading(Double)` was replaced with `State.loading(String)` — WhisperKit's progress callback can't be set before `init()` completes, so a determinate progress bar isn't possible without a custom download step. Indeterminate spinner + status text is the correct UX.
+- Model cache path: `~/Library/Containers/art.andystew.Voxy/Data/Documents/huggingface/models/argmaxinc/whisperkit-coreml/openai_whisper-small.en/`
+- To reset for testing: `rm -rf ~/Library/Containers/art.andystew.Voxy/Data/Documents/huggingface`
+- `import Combine` is required in `TranscriptionManager.swift` for `@Published` to compile
 
 ---
 
