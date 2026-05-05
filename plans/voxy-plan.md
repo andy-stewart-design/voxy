@@ -42,30 +42,21 @@ The app currently has a working foundation: a menu bar extra, a settings window,
 
 ---
 
-### 1b — Transcript accumulation + ⌘↩ to copy and close
+### ~~1b — Transcript accumulation + ⌘↩ to copy and close~~ ✅ DONE
 
-**What changes:**
+**What was built:**
 
-- `ContentView.swift`: replace single `Text` with `@State var accumulatedTranscript = ""`; append each new result as a new paragraph
-- Each recording appends; transcript is editable in a `TextEditor` at any time
-- ⌘↩ copies `accumulatedTranscript` to `NSPasteboard` and closes the window (disabled when transcript is empty)
-- Opening the window always starts a fresh session (clear on `.onAppear`)
+- `accumulatedTranscript: String` owned by ContentView; each recording appends as a new paragraph
+- `TextEditor` replaces plain `Text` — editable between and after recordings
+- ⌘↩ copies full transcript to `NSPasteboard` and closes the window via `NSApp.keyWindow?.close()`
+- Fresh session on `.onAppear` (`accumulatedTranscript = ""`)
+- Right⌘ + Right⌥ toggles record/stop via `NSEvent.addLocalMonitorForEvents(matching: .flagsChanged)`
 
-```swift
-stopRecording()
-if let url = recordingURL,
-   let result = await transcription.transcribe(audioURL: url) {
-    accumulatedTranscript += accumulatedTranscript.isEmpty ? result : "\n\n" + result
-}
-```
-
-**Acceptance criteria:**
-
-- [ ] Recording again appends a new paragraph to existing transcript
-- [ ] Transcript is editable between recordings
-- [ ] ⌘↩ copies full accumulated text to clipboard and closes the window
-- [ ] ⌘↩ is disabled when transcript is empty
-- [ ] Reopening the window shows an empty transcript (fresh session)
+**Key learnings / gotchas:**
+- `.keyboardShortcut` doesn't work for arrow keys when `TextEditor` has focus — `TextEditor` consumes them first; use a local `NSEvent` monitor instead
+- Modifier-only chords (no character key) use `.flagsChanged` events, not `.keyDown`
+- Left/right modifier distinction requires raw flag bits: right command = `0x10`, right option = `0x40` — `NSEvent.ModifierFlags` doesn't expose this
+- Track a `shortcutChordActive` bool to fire the action only once on press-down, not repeatedly as flags change
 
 ---
 
