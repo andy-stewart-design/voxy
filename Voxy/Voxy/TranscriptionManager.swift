@@ -62,15 +62,25 @@ final class TranscriptionManager: ObservableObject {
         let message = isCached ? "Loading model…" : "Downloading model (small.en, ~244 MB)…"
         state = .loading(message)
 
-        do {
-            whisperKit = try await WhisperKit(
-                model: Self.modelName,
-                verbose: false,
-                prewarm: true
-            )
-            state = .ready
-        } catch {
-            state = .failed(error.localizedDescription)
+        // Attempt up to 2 times — first launches can fail transiently while
+        // the model is being written to disk. A single automatic retry covers
+        // this without surfacing a confusing error to the user.
+        for attempt in 1...2 {
+            do {
+                whisperKit = try await WhisperKit(
+                    model: Self.modelName,
+                    verbose: false,
+                    prewarm: true
+                )
+                state = .ready
+                return
+            } catch {
+                if attempt == 2 {
+                    state = .failed(error.localizedDescription)
+                } else {
+                    state = .loading("Retrying…")
+                }
+            }
         }
     }
 

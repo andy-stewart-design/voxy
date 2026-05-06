@@ -34,6 +34,12 @@ struct MenuView: View {
     var body: some View {
         Button("Settings") {
             openWindow(id: "main")
+            // Move the window to the user's current Space rather than
+            // switching to whichever Space it was last on.
+            if let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }) {
+                window.collectionBehavior.insert(.moveToActiveSpace)
+                window.orderFrontRegardless()
+            }
             NSApp.activate(ignoringOtherApps: true)
         }
         Divider()
