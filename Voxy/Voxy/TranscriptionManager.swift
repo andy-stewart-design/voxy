@@ -78,7 +78,8 @@ final class TranscriptionManager: ObservableObject {
                 if attempt == 2 {
                     state = .failed(error.localizedDescription)
                 } else {
-                    state = .loading("Retrying…")
+                    let message = isCached ? "Loading model…" : "Downloading model (small.en, ~244 MB)…"
+                    state = .loading(message)
                 }
             }
         }
