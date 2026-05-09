@@ -1,10 +1,102 @@
 import AVFoundation
 import AppKit
+import Combine
 import SwiftUI
+
+// MARK: - TranscriptEditorState
+
+final class TranscriptEditorState: ObservableObject {
+    weak var textView: NSTextView?
+
+    func insertAtCursor(_ text: String) {
+        guard let tv = textView else { return }
+        let range = tv.selectedRange()
+        if tv.shouldChangeText(in: range, replacementString: text) {
+            tv.textStorage?.replaceCharacters(in: range, with: text)
+            tv.didChangeText()
+            let newPos = range.location + (text as NSString).length
+            tv.setSelectedRange(NSRange(location: newPos, length: 0))
+        }
+    }
+}
+
+// MARK: - TranscriptEditor
+
+struct TranscriptEditor: NSViewRepresentable {
+    @Binding var text: String
+    let editorState: TranscriptEditorState
+    @Environment(\.colorScheme) private var colorScheme
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let textView = NSTextView()
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.drawsBackground = false
+        textView.textColor = .labelColor
+        textView.insertionPointColor = .controlAccentColor
+        textView.font = .systemFont(ofSize: NSFont.systemFontSize)
+        textView.typingAttributes = [
+            .foregroundColor: NSColor.labelColor,
+            .font: NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        ]
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.textContainerInset = NSSize(width: 4, height: 4)
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
+        textView.delegate = context.coordinator
+
+        editorState.textView = textView
+
+        let scrollView = NSScrollView()
+        scrollView.documentView = textView
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
+                                  height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.containerSize = NSSize(
+            width: scrollView.contentSize.width,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? NSTextView else { return }
+
+        let appearance = NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua)
+        scrollView.appearance = appearance
+        textView.appearance = appearance
+        textView.textColor = .labelColor
+        textView.insertionPointColor = .controlAccentColor
+
+        if textView.string != text {
+            textView.string = text
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var text: Binding<String>
+        init(text: Binding<String>) { self.text = text }
+
+        func textDidChange(_ notification: Notification) {
+            guard let tv = notification.object as? NSTextView else { return }
+            text.wrappedValue = tv.string
+        }
+    }
+}
+
+// MARK: - ContentView
 
 struct ContentView: View {
     @EnvironmentObject private var transcription: TranscriptionManager
     @StateObject private var audio = AudioInputManager()
+    @StateObject private var editorState = TranscriptEditorState()
 
     @State private var engine = AVAudioEngine()
     @State private var isRecording = false
@@ -50,10 +142,8 @@ struct ContentView: View {
                     .foregroundStyle(.tertiary)
                     .padding(12)
             }
-            TextEditor(text: $accumulatedTranscript)
-                .scrollContentBackground(.hidden)
-                .padding(8)
-                .opacity(accumulatedTranscript.isEmpty ? 0.01 : 1) // keep it tappable when empty
+            TranscriptEditor(text: $accumulatedTranscript, editorState: editorState)
+                .opacity(accumulatedTranscript.isEmpty ? 0.01 : 1)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -205,11 +295,7 @@ struct ContentView: View {
 
         guard let url = recordingURL else { return }
         if let result = await transcription.transcribe(audioURL: url) {
-            if accumulatedTranscript.isEmpty {
-                accumulatedTranscript = result
-            } else {
-                accumulatedTranscript += "\n\n" + result
-            }
+            editorState.insertAtCursor(result + " ")
         }
     }
 
