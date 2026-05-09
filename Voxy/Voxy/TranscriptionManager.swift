@@ -14,18 +14,26 @@ final class TranscriptionManager: ObservableObject {
         case failed(String)
     }
 
+    // MARK: - Constants
+
+    static let availableModels = ["tiny.en", "base.en", "small.en", "medium.en"]
+    private static let defaultModel = "small.en"
+    private static let modelKey = "selectedModel"
+
     // MARK: - Published
 
     @Published private(set) var state: State = .loading("Initializing…")
+    @Published private(set) var selectedModel: String
 
     // MARK: - Private
 
-    private static let modelName = "small.en"
     private var whisperKit: WhisperKit?
 
     // MARK: - Init
 
     init() {
+        let saved = UserDefaults.standard.string(forKey: Self.modelKey) ?? Self.defaultModel
+        selectedModel = Self.availableModels.contains(saved) ? saved : Self.defaultModel
         Task { await loadModel() }
     }
 
@@ -51,6 +59,13 @@ final class TranscriptionManager: ObservableObject {
         }
     }
 
+    func switchModel(to model: String) {
+        guard Self.availableModels.contains(model), model != selectedModel else { return }
+        selectedModel = model
+        UserDefaults.standard.set(model, forKey: Self.modelKey)
+        Task { await loadModel() }
+    }
+
     func retry() {
         Task { await loadModel() }
     }
@@ -59,8 +74,8 @@ final class TranscriptionManager: ObservableObject {
 
     private func loadModel() async {
         whisperKit = nil
-        let message = isCached ? "Loading model…" : "Downloading model (small.en, ~244 MB)…"
-        state = .loading(message)
+        let model = selectedModel   // capture — selectedModel may change while we await
+        state = .loading(isCached(model) ? "Loading \(model)…" : "Downloading \(model)…")
 
         // Attempt up to 2 times — first launches can fail transiently while
         // the model is being written to disk. A single automatic retry covers
@@ -68,7 +83,7 @@ final class TranscriptionManager: ObservableObject {
         for attempt in 1...2 {
             do {
                 whisperKit = try await WhisperKit(
-                    model: Self.modelName,
+                    model: model,
                     verbose: false,
                     prewarm: true
                 )
@@ -78,8 +93,7 @@ final class TranscriptionManager: ObservableObject {
                 if attempt == 2 {
                     state = .failed(error.localizedDescription)
                 } else {
-                    let message = isCached ? "Loading model…" : "Downloading model (small.en, ~244 MB)…"
-                    state = .loading(message)
+                    state = .loading(isCached(model) ? "Loading \(model)…" : "Downloading \(model)…")
                 }
             }
         }
@@ -89,14 +103,14 @@ final class TranscriptionManager: ObservableObject {
     ///
     /// WhisperKit caches to Documents/huggingface/models/argmaxinc/whisperkit-coreml/
     /// within the app sandbox container.
-    private var isCached: Bool {
+    private func isCached(_ model: String) -> Bool {
         guard let documents = FileManager.default.urls(
             for: .documentDirectory, in: .userDomainMask
         ).first else { return false }
 
         let modelDir = documents
             .appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml")
-            .appendingPathComponent("openai_whisper-\(Self.modelName)")
+            .appendingPathComponent("openai_whisper-\(model)")
 
         return FileManager.default.fileExists(atPath: modelDir.path)
     }
