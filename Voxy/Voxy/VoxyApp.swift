@@ -9,6 +9,7 @@ struct VoxyApp: App {
     var body: some Scene {
         MenuBarExtra("Voxy", systemImage: "waveform") {
             MenuView()
+                .environmentObject(transcription)
         }
         .menuBarExtraStyle(.menu)
 
@@ -30,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 struct MenuView: View {
     @Environment(\.openWindow) private var openWindow
+    @EnvironmentObject private var transcription: TranscriptionManager
 
     var body: some View {
         Button("Settings") {
@@ -42,6 +44,21 @@ struct MenuView: View {
             }
             NSApp.activate(ignoringOtherApps: true)
         }
+
+        Menu("Model") {
+            Picker("Model", selection: Binding(
+                get: { transcription.selectedModel },
+                set: { transcription.switchModel(to: $0) }
+            )) {
+                ForEach(TranscriptionManager.availableModels, id: \.self) { model in
+                    Text(model).tag(model)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        }
+        .disabled(transcription.state != .ready)
+
         Divider()
         Button("Quit Voxy") {
             NSApp.terminate(nil)

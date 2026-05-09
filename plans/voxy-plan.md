@@ -60,7 +60,7 @@ The app currently has a working foundation: a menu bar extra, a settings window,
 
 ---
 
-### 1c — Model switcher in menu bar
+### ~~1c — Model switcher in menu bar~~ ✅ DONE
 
 **What changes:**
 
@@ -87,14 +87,19 @@ Quit Voxy
 
 **Acceptance criteria:**
 
-- [ ] Switching model triggers a load (download if not cached, fast if cached)
-- [ ] Checkmark reflects active model
-- [ ] Model submenu items are disabled during loading/transcribing/recording
-- [ ] Selected model persists across app restarts
+- [x] Switching model triggers a load (download if not cached, fast if cached)
+- [x] Checkmark reflects active model (via `Picker` with `.inline` style — native macOS checkmark)
+- [x] Model submenu items are disabled during loading/transcribing/recording
+- [x] Selected model persists across app restarts
+
+**Key learnings / gotchas:**
+- Use `Picker` with `.pickerStyle(.inline)` inside `Menu` for native NSMenuItem checkmarks — `Label(model, systemImage: "checkmark")` puts an SF Symbol icon next to the text, which is not the same as the native state checkmark
+- `isCached` takes the model name as a parameter (not hardcoded) so it works correctly across model switches
+- Capture `let model = selectedModel` at the top of `loadModel()` — if the user switches models while a load is in progress, the in-flight load continues with its original model
 
 ---
 
-### 1d — Waveform in bottom bar
+### ~~1d — Waveform in bottom bar~~ ✅ DONE
 
 **Layout (from mockup):**
 
@@ -126,14 +131,21 @@ The transcript `TextEditor` fills the entire main body above this bar. There is 
 
 **Acceptance criteria:**
 
-- [ ] Bars animate in real time while speaking, visible in the bottom-left corner
-- [ ] Bar heights visibly respond to volume changes
-- [ ] Waveform disappears (or becomes static) when not recording
-- [ ] No audio glitches or threading warnings introduced
+- [x] Bars animate in real time while speaking, visible in the bottom-left corner
+- [x] Bar heights visibly respond to volume changes
+- [x] Waveform disappears (or becomes static) when not recording
+- [x] No audio glitches or threading warnings introduced
+
+**Key learnings / gotchas:**
+- `RecordingState` is a `@MainActor ObservableObject` — the audio tap captures a reference to it and uses `Task { @MainActor in state.addSample(rms) }` to hop back to the main actor
+- Use `vDSP_rmsqv` from Accelerate for efficient RMS computation on the audio thread
+- Amplitude scaling: `min(rms * 30, 1.0)` — typical speech RMS is 0.02–0.05, so a 30x multiplier fills the bar range naturally
+- `SF Compact Display` is available as a named font on macOS: `Font.custom("SF Compact Display", size: 15)`
+- Timer uses a `Task` loop with `Task.sleep(nanoseconds: 1_000_000_000)` — cancel on stop
 
 ---
 
-### 1e — Raycast-style UI polish
+### ~~1e — Raycast-style UI polish~~ ✅ DONE
 
 **What changes (based on mockup):**
 
@@ -156,10 +168,19 @@ The transcript `TextEditor` fills the entire main body above this bar. There is 
 
 **Acceptance criteria:**
 
-- [ ] Window matches the mockup: dark, rounded, traffic lights, transcript fills the body
-- [ ] Bottom bar is a single strip with waveform left, hints right
-- [ ] No layout shift when waveform appears/disappears
-- [ ] Placeholder text visible when transcript is empty and not recording
+- [x] Window matches the mockup: dark, rounded, traffic lights, transcript fills the body
+- [x] Bottom bar is a single strip with waveform left, hints right
+- [x] No layout shift when waveform appears/disappears (fixed height: 44pt)
+- [x] Placeholder text visible when transcript is empty and not recording
+
+**Key learnings / gotchas:**
+- `NSTextView` doesn't inherit SwiftUI appearance — must explicitly set `NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua)` on both the scroll view and text view in `updateNSView`, otherwise text renders as black-on-dark (invisible)
+- Setting `textView.string` programmatically resets attributed storage to default colors — re-apply `textColor` and `typingAttributes` in `updateNSView` via a shared `applyStyle` helper
+- `window.isOpaque = false` + `window.backgroundColor = .clear` + `.background(.regularMaterial)` gives the vibrancy/blur effect
+- Removing the titlebar background requires replacing the entire window chrome — not worth it; default macOS titlebar is fine
+- Bottom bar uses `.frame(height: 44)` to prevent height collapse when spinner replaces action buttons
+- `BottomBarButton` reads `@Environment(\.isEnabled)` to show disabled visual state; hover effect suppressed when disabled
+- `BottomBarButton` action closure triggers `.keyboardShortcut(.return, modifiers: .command)` on the Copy Transcription button — must be attached to the view, not inside the closure
 
 ---
 
