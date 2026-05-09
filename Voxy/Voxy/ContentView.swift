@@ -1,7 +1,73 @@
+import Accelerate
 import AVFoundation
 import AppKit
 import Combine
 import SwiftUI
+
+// MARK: - RecordingState
+
+@MainActor
+final class RecordingState: ObservableObject {
+    @Published private(set) var elapsedSeconds: Int = 0
+    @Published private(set) var amplitudeSamples: [Float] = []
+
+    private static let barCount = 12
+    private var timerTask: Task<Void, Never>?
+
+    func start() {
+        elapsedSeconds = 0
+        amplitudeSamples = []
+        timerTask?.cancel()
+        timerTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled else { break }
+                elapsedSeconds += 1
+            }
+        }
+    }
+
+    func stop() {
+        timerTask?.cancel()
+        timerTask = nil
+        amplitudeSamples = []
+    }
+
+    func addSample(_ rms: Float) {
+        if amplitudeSamples.count >= Self.barCount {
+            amplitudeSamples.removeFirst()
+        }
+        amplitudeSamples.append(rms)
+    }
+}
+
+// MARK: - WaveformView
+
+struct WaveformView: View {
+    let samples: [Float]
+
+    private static let barCount   = 12
+    private static let barWidth:  CGFloat = 2.5
+    private static let barSpacing: CGFloat = 2
+    private static let minHeight: CGFloat = 3
+    private static let maxHeight: CGFloat = 22
+
+    var body: some View {
+        HStack(alignment: .center, spacing: Self.barSpacing) {
+            ForEach(0..<Self.barCount, id: \.self) { i in
+                let rms = i < samples.count ? CGFloat(samples[i]) : 0
+                // Scale up quiet speech (typical RMS 0.02–0.15) to fill the range.
+                let normalized = min(rms * 30, 1.0)
+                let height = Self.minHeight + normalized * (Self.maxHeight - Self.minHeight)
+                Capsule()
+                    .frame(width: Self.barWidth, height: height)
+                    .animation(.easeOut(duration: 0.08), value: height)
+            }
+        }
+        .foregroundStyle(.primary)
+        .frame(height: Self.maxHeight)
+    }
+}
 
 // MARK: - TranscriptEditorState
 
@@ -27,6 +93,9 @@ struct TranscriptEditor: NSViewRepresentable {
     let editorState: TranscriptEditorState
     @Environment(\.colorScheme) private var colorScheme
 
+    static let fontSize: CGFloat = 18
+    private static let fontWeight: NSFont.Weight = .light
+
     func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -34,16 +103,11 @@ struct TranscriptEditor: NSViewRepresentable {
         textView.isEditable = true
         textView.isSelectable = true
         textView.drawsBackground = false
-        textView.textColor = .labelColor
         textView.insertionPointColor = .controlAccentColor
-        textView.font = .systemFont(ofSize: NSFont.systemFontSize)
-        textView.typingAttributes = [
-            .foregroundColor: NSColor.labelColor,
-            .font: NSFont.systemFont(ofSize: NSFont.systemFontSize)
-        ]
+        Self.applyStyle(to: textView)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
-        textView.textContainerInset = NSSize(width: 4, height: 4)
+        textView.textContainerInset = NSSize(width: 12, height: 12)
         textView.autoresizingMask = [.width]
         textView.textContainer?.widthTracksTextView = true
         textView.delegate = context.coordinator
@@ -72,12 +136,23 @@ struct TranscriptEditor: NSViewRepresentable {
         let appearance = NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua)
         scrollView.appearance = appearance
         textView.appearance = appearance
-        textView.textColor = .labelColor
-        textView.insertionPointColor = .controlAccentColor
+        Self.applyStyle(to: textView)
 
         if textView.string != text {
             textView.string = text
         }
+    }
+
+    /// Applies font, color, and typing attributes. Called from both make and update
+    /// so that changes to fontSize take effect without recreating the view.
+    private static func applyStyle(to textView: NSTextView) {
+        let font = NSFont.systemFont(ofSize: fontSize, weight: fontWeight)
+        textView.textColor = .labelColor
+        textView.font = font
+        textView.typingAttributes = [
+            .foregroundColor: NSColor.labelColor,
+            .font: font
+        ]
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
@@ -97,6 +172,7 @@ struct ContentView: View {
     @EnvironmentObject private var transcription: TranscriptionManager
     @StateObject private var audio = AudioInputManager()
     @StateObject private var editorState = TranscriptEditorState()
+    @StateObject private var recordingState = RecordingState()
 
     @State private var engine = AVAudioEngine()
     @State private var isRecording = false
@@ -139,6 +215,7 @@ struct ContentView: View {
         ZStack(alignment: .topLeading) {
             if accumulatedTranscript.isEmpty && transcription.state == .ready && !isRecording {
                 Text("Record to start transcribing…")
+                    .font(.system(size: TranscriptEditor.fontSize, weight: .light))
                     .foregroundStyle(.tertiary)
                     .padding(12)
             }
@@ -194,13 +271,29 @@ struct ContentView: View {
                 } else if let error = errorMessage {
                     Text(error).font(.caption).foregroundStyle(.red)
                 } else if isRecording {
-                    Text("Recording").font(.caption).foregroundStyle(.green)
+                    recordingIndicator
                 } else if let device = audio.currentDeviceName {
                     Text(device).font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
         .animation(.default, value: transcription.state)
+    }
+
+    private var recordingIndicator: some View {
+        HStack(spacing: 10) {
+            Text(formattedElapsed)
+                .font(.custom("SF Compact Display", size: 15))
+                .monospacedDigit()
+                .foregroundStyle(.primary)
+            WaveformView(samples: recordingState.amplitudeSamples)
+        }
+    }
+
+    private var formattedElapsed: String {
+        let m = recordingState.elapsedSeconds / 60
+        let s = recordingState.elapsedSeconds % 60
+        return String(format: "%d:%02d", m, s)
     }
 
     private var recordButton: some View {
@@ -271,8 +364,17 @@ struct ContentView: View {
             return
         }
 
+        // Capture reference for use on the audio thread.
+        let state = recordingState
         engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
             try? file.write(from: buffer)
+
+            // Compute RMS on the audio thread, then hop to MainActor to update state.
+            guard let channelData = buffer.floatChannelData?[0] else { return }
+            var rms: Float = 0
+            vDSP_rmsqv(channelData, 1, &rms, vDSP_Length(buffer.frameLength))
+
+            Task { @MainActor in state.addSample(rms) }
         }
 
         do {
@@ -285,6 +387,7 @@ struct ContentView: View {
 
         recordingURL = tempURL
         isRecording = true
+        recordingState.start()
     }
 
     private func stopAndTranscribe() async {
@@ -292,6 +395,7 @@ struct ContentView: View {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         isRecording = false
+        recordingState.stop()
 
         guard let url = recordingURL else { return }
         if let result = await transcription.transcribe(audioURL: url) {
