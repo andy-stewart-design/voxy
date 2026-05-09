@@ -4,6 +4,51 @@ import AppKit
 import Combine
 import SwiftUI
 
+// MARK: - ShortcutBadge
+
+struct ShortcutBadge: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 5).fill(.primary.opacity(0.08)))
+    }
+}
+
+// MARK: - BottomBarButton
+
+struct BottomBarButton: View {
+    let title: String
+    let shortcut: String
+    let action: () -> Void
+
+    @State private var isHovered = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                Text(title)
+                    .font(.system(size: 13, weight: .medium))
+                ShortcutBadge(text: shortcut)
+            }
+            .foregroundStyle(isEnabled ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isHovered && isEnabled ? Color.primary.opacity(0.06) : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+    }
+}
+
 // MARK: - RecordingState
 
 @MainActor
@@ -46,19 +91,18 @@ final class RecordingState: ObservableObject {
 struct WaveformView: View {
     let samples: [Float]
 
-    private static let barCount   = 12
-    private static let barWidth:  CGFloat = 2.5
+    private static let barCount    = 12
+    private static let barWidth:   CGFloat = 2.5
     private static let barSpacing: CGFloat = 2
-    private static let minHeight: CGFloat = 3
-    private static let maxHeight: CGFloat = 22
+    private static let minHeight:  CGFloat = 3
+    private static let maxHeight:  CGFloat = 22
 
     var body: some View {
         HStack(alignment: .center, spacing: Self.barSpacing) {
             ForEach(0..<Self.barCount, id: \.self) { i in
-                let rms = i < samples.count ? CGFloat(samples[i]) : 0
-                // Scale up quiet speech (typical RMS 0.02–0.15) to fill the range.
+                let rms        = i < samples.count ? CGFloat(samples[i]) : 0
                 let normalized = min(rms * 30, 1.0)
-                let height = Self.minHeight + normalized * (Self.maxHeight - Self.minHeight)
+                let height     = Self.minHeight + normalized * (Self.maxHeight - Self.minHeight)
                 Capsule()
                     .frame(width: Self.barWidth, height: height)
                     .animation(.easeOut(duration: 0.08), value: height)
@@ -93,7 +137,7 @@ struct TranscriptEditor: NSViewRepresentable {
     let editorState: TranscriptEditorState
     @Environment(\.colorScheme) private var colorScheme
 
-    static let fontSize: CGFloat = 18
+    static let fontSize:   CGFloat        = 18
     private static let fontWeight: NSFont.Weight = .light
 
     func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
@@ -104,13 +148,13 @@ struct TranscriptEditor: NSViewRepresentable {
         textView.isSelectable = true
         textView.drawsBackground = false
         textView.insertionPointColor = .controlAccentColor
-        Self.applyStyle(to: textView)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.textContainerInset = NSSize(width: 12, height: 12)
         textView.autoresizingMask = [.width]
         textView.textContainer?.widthTracksTextView = true
         textView.delegate = context.coordinator
+        Self.applyStyle(to: textView)
 
         editorState.textView = textView
 
@@ -184,19 +228,17 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Main transcript area
             transcriptArea
-
             Divider()
-
-            // Bottom bar: state feedback + action hints
             bottomBar
         }
-        .frame(minWidth: 480, minHeight: 320)
+        .frame(minWidth: 560, minHeight: 440)
+        .background(.regularMaterial)
         .onAppear {
             NSApp.activate(ignoringOtherApps: true)
-            accumulatedTranscript = ""   // fresh session each open
+            accumulatedTranscript = ""
             installKeyboardShortcuts()
+            configureWindow()
         }
         .onDisappear {
             if let monitor = eventMonitor {
@@ -207,6 +249,14 @@ struct ContentView: View {
         .task {
             await requestMicrophonePermissionIfNeeded()
         }
+    }
+
+    // MARK: - Window Setup
+
+    private func configureWindow() {
+        guard let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }) else { return }
+        window.isOpaque = false
+        window.backgroundColor = .clear
     }
 
     // MARK: - Subviews
@@ -226,23 +276,16 @@ struct ContentView: View {
     }
 
     private var bottomBar: some View {
-        HStack {
-            // Left: status
+        HStack(spacing: 0) {
             statusIndicator
-
             Spacer()
-
-            // Right: action hints
-            HStack(spacing: 16) {
-                recordButton
-                if !accumulatedTranscript.isEmpty {
-                    copyCloseButton
-                }
-            }
+            actionBar
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .frame(height: 44)
+        .padding(.horizontal, 12)
     }
+
+    // MARK: - Status Indicator (left)
 
     private var statusIndicator: some View {
         Group {
@@ -296,32 +339,46 @@ struct ContentView: View {
         return String(format: "%d:%02d", m, s)
     }
 
-    private var recordButton: some View {
-        Button(isRecording ? "Stop" : "Record") {
-            Task {
-                if isRecording {
-                    await stopAndTranscribe()
-                } else {
-                    await startRecording()
+    // MARK: - Action Bar (right)
+
+    @ViewBuilder
+    private var actionBar: some View {
+        if case .ready = transcription.state {
+            HStack(spacing: 2) {
+                BottomBarButton(
+                    title: isRecording ? "Stop" : "Record",
+                    shortcut: "⌘ Right + ⌥"
+                ) {
+                    Task {
+                        if isRecording { await stopAndTranscribe() }
+                        else { await startRecording() }
+                    }
+                }
+                .disabled(recordButtonDisabled)
+
+                if !accumulatedTranscript.isEmpty {
+                    Rectangle()
+                        .fill(.primary.opacity(0.15))
+                        .frame(width: 1, height: 14)
+                        .padding(.horizontal, 4)
+
+                    BottomBarButton(
+                        title: "Copy Transcription",
+                        shortcut: "⌘ + Enter"
+                    ) {
+                        copyAndClose()
+                    }
+                    .keyboardShortcut(.return, modifiers: .command)
                 }
             }
         }
-        .disabled(recordButtonDisabled)
     }
 
     private var recordButtonDisabled: Bool {
-        if isRecording { return false }                        // always allow stopping
+        if isRecording { return false }
         if audio.readiness == .permissionDenied { return true }
-        if transcription.state != .ready { return true }      // loading / transcribing / failed
+        if transcription.state != .ready { return true }
         return false
-    }
-
-    private var copyCloseButton: some View {
-        Button("Copy & Close") {
-            copyAndClose()
-        }
-        .keyboardShortcut(.return, modifiers: .command)
-        .disabled(accumulatedTranscript.isEmpty)
     }
 
     // MARK: - Actions
@@ -364,12 +421,10 @@ struct ContentView: View {
             return
         }
 
-        // Capture reference for use on the audio thread.
         let state = recordingState
         engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
             try? file.write(from: buffer)
 
-            // Compute RMS on the audio thread, then hop to MainActor to update state.
             guard let channelData = buffer.floatChannelData?[0] else { return }
             var rms: Float = 0
             vDSP_rmsqv(channelData, 1, &rms, vDSP_Length(buffer.frameLength))
@@ -391,7 +446,6 @@ struct ContentView: View {
     }
 
     private func stopAndTranscribe() async {
-        // Remove tap first — flushes and closes the AVAudioFile.
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         isRecording = false
@@ -421,11 +475,8 @@ struct ContentView: View {
             if bothDown && !shortcutChordActive {
                 shortcutChordActive = true
                 Task {
-                    if isRecording {
-                        await stopAndTranscribe()
-                    } else {
-                        await startRecording()
-                    }
+                    if isRecording { await stopAndTranscribe() }
+                    else { await startRecording() }
                 }
             } else if !bothDown {
                 shortcutChordActive = false
